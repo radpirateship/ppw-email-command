@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy: #001a5c;
+  --accent: #0a86cb;
+  --canvas: #f4f6fb;
+}
+
+html,
+body {
+  background-color: var(--canvas);
+  color: #1b2333;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl2 shadow-card border border-black/[0.04];
+  }
+  .pill {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+}
