@@ -75,3 +75,33 @@ export function ComingBadge() {
     </span>
   );
 }
+
+/**
+ * Numbered, on-brand step list shown when a task card is expanded.
+ * `refDoc` (optional) surfaces the companion doc filename as a small chip.
+ */
+export function TaskSteps({ steps, refDoc }: { steps: string[]; refDoc?: string }) {
+  return (
+    <div>
+      {refDoc && (
+        <div className="mb-3 inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1 text-xs font-semibold text-accent ring-1 ring-inset ring-accent/20">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+          </svg>
+          Full detail: {refDoc}
+        </div>
+      )}
+      <ol className="space-y-2.5">
+        {steps.map((step, i) => (
+          <li key={i} className="flex gap-3 text-sm leading-relaxed text-ink">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-navy text-[11px] font-bold text-white">
+              {i + 1}
+            </span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}

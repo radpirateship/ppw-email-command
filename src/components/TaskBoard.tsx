@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TASKS, PHASES, PRIORITY_WEIGHT, type Task } from "@/lib/tasks";
-import { PriorityPill, ProgressBar } from "@/components/ui";
+import { PriorityPill, ProgressBar, TaskSteps } from "@/components/ui";
 
 const STORAGE_KEY = "ppw_tasks_v1";
 
@@ -146,6 +146,8 @@ export default function TaskBoard() {
 }
 
 function DoNextCard({ task, onDone }: { task: Task; onDone: () => void }) {
+  const [open, setOpen] = useState(false);
+  const hasSteps = task.steps && task.steps.length > 0;
   return (
     <div className="card overflow-hidden">
       <div className="bg-navy px-7 py-6 text-white">
@@ -162,6 +164,15 @@ function DoNextCard({ task, onDone }: { task: Task; onDone: () => void }) {
           <span className="rounded-full bg-white/10 px-3 py-1 text-white/80">
             ⏱ {task.est}
           </span>
+          {hasSteps && (
+            <button
+              onClick={() => setOpen((o) => !o)}
+              aria-expanded={open}
+              className="rounded-full bg-white/10 px-3 py-1 text-white/90 transition-colors hover:bg-white/20"
+            >
+              {open ? "Hide steps" : `Show steps (${task.steps.length})`}
+            </button>
+          )}
           <button
             onClick={onDone}
             className="ml-auto rounded-full bg-accent px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-accent-600"
@@ -169,6 +180,11 @@ function DoNextCard({ task, onDone }: { task: Task; onDone: () => void }) {
             Mark done
           </button>
         </div>
+        {hasSteps && open && (
+          <div className="mt-5 rounded-xl bg-white/95 p-5 text-ink">
+            <TaskSteps steps={task.steps} refDoc={task.ref} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -183,39 +199,72 @@ function TaskRow({
   done: boolean;
   onToggle: () => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const hasSteps = task.steps && task.steps.length > 0;
+
   return (
     <div
       className={[
-        "card flex items-start gap-4 px-5 py-4 transition-shadow hover:shadow-cardHover",
+        "card transition-shadow hover:shadow-cardHover",
         done ? "opacity-60" : "",
       ].join(" ")}
     >
-      <button
-        onClick={onToggle}
-        aria-label={done ? "Mark incomplete" : "Mark complete"}
-        className={[
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors",
-          done
-            ? "border-emerald-500 bg-emerald-500 text-white"
-            : "border-slate-300 bg-white hover:border-accent",
-        ].join(" ")}
-      >
-        {done && (
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M5 13l4 4L19 7" />
-          </svg>
-        )}
-      </button>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`font-semibold text-ink ${done ? "line-through" : ""}`}>
-            {task.title}
-          </span>
-          <PriorityPill priority={task.priority} />
-          <span className="text-xs text-muted">⏱ {task.est}</span>
+      <div className="flex items-start gap-4 px-5 py-4">
+        <button
+          onClick={onToggle}
+          aria-label={done ? "Mark incomplete" : "Mark complete"}
+          className={[
+            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors",
+            done
+              ? "border-emerald-500 bg-emerald-500 text-white"
+              : "border-slate-300 bg-white hover:border-accent",
+          ].join(" ")}
+        >
+          {done && (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`font-semibold text-ink ${done ? "line-through" : ""}`}>
+              {task.title}
+            </span>
+            <PriorityPill priority={task.priority} />
+            <span className="text-xs text-muted">⏱ {task.est}</span>
+          </div>
+          <p className="mt-1 text-sm text-muted">{task.why}</p>
         </div>
-        <p className="mt-1 text-sm text-muted">{task.why}</p>
+        {hasSteps && (
+          <button
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            aria-label={open ? "Hide steps" : "Show steps"}
+            className="mt-0.5 flex shrink-0 items-center gap-1 rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-accent transition-colors hover:bg-accent/5"
+          >
+            Steps
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className={open ? "rotate-180 transition-transform" : "transition-transform"}
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
       </div>
+      {hasSteps && open && (
+        <div className="border-t border-slate-100 px-5 py-4">
+          <TaskSteps steps={task.steps} refDoc={task.ref} />
+        </div>
+      )}
     </div>
   );
 }

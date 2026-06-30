@@ -22,6 +22,18 @@ export interface OptInData {
   source: "seed" | "live";
 }
 
+/** One month of blended opt-in performance. */
+export interface MonthlyOptInPoint {
+  label: string; // e.g. "Dec '25"
+  rate: number; // blended submit rate as a decimal (0.0103 = 1.03%)
+}
+
+export interface MonthlyOptInData {
+  points: MonthlyOptInPoint[];
+  targetRate: number; // decimal, e.g. 0.025
+  source: "seed" | "live";
+}
+
 export interface RevenueData {
   emailAttributedRevenue: number;
   totalRevenue: number;
@@ -64,6 +76,21 @@ export const OPTIN_SEED: OptInData = {
   blendedRate: 0.011,
   targetRate: 0.025,
   popups: POPUPS,
+  source: "seed",
+};
+
+// --- Monthly opt-in trend seed (real, last 6 months) --------------------------
+// Blended submit rate (submits / views) across all signup forms per month.
+export const MONTHLY_OPTIN_SEED: MonthlyOptInData = {
+  points: [
+    { label: "Dec '25", rate: 0.0103 },
+    { label: "Jan '26", rate: 0.0129 },
+    { label: "Feb '26", rate: 0.0118 },
+    { label: "Mar '26", rate: 0.0076 },
+    { label: "Apr '26", rate: 0.0109 },
+    { label: "May '26", rate: 0.009 },
+  ],
+  targetRate: 0.025,
   source: "seed",
 };
 

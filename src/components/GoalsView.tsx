@@ -5,14 +5,17 @@ import {
   OPTIN_SEED,
   REVENUE_SEED,
   FLOW_STATUS,
+  MONTHLY_OPTIN_SEED,
   type OptInData,
   type RevenueData,
+  type MonthlyOptInData,
   formatCurrency,
   formatPct,
   formatNumber,
 } from "@/lib/data";
 import { ProgressBar } from "@/components/ui";
 import Sparkline from "@/components/Sparkline";
+import MonthlyOptInChart from "@/components/MonthlyOptInChart";
 
 interface Recommendation {
   title: string;
@@ -80,6 +83,8 @@ const SEV_STYLES: Record<Recommendation["severity"], { ring: string; dot: string
 export default function GoalsView() {
   const [optin, setOptin] = useState<OptInData>(OPTIN_SEED);
   const [revenue, setRevenue] = useState<RevenueData>(REVENUE_SEED);
+  const [monthly, setMonthly] = useState<MonthlyOptInData>(MONTHLY_OPTIN_SEED);
+  const [optinView, setOptinView] = useState<"blended" | "monthly">("blended");
 
   // Wire the live-or-seed API routes. They always return valid data (seed fallback),
   // so the page renders instantly from seed and upgrades if live data arrives.
@@ -92,6 +97,10 @@ export default function GoalsView() {
     fetch("/api/klaviyo/revenue")
       .then((r) => r.json())
       .then((d: RevenueData) => alive && d && setRevenue(d))
+      .catch(() => {});
+    fetch("/api/klaviyo/optin-monthly")
+      .then((r) => r.json())
+      .then((d: MonthlyOptInData) => alive && d && Array.isArray(d.points) && d.points.length > 0 && setMonthly(d))
       .catch(() => {});
     return () => {
       alive = false;
@@ -113,18 +122,52 @@ export default function GoalsView() {
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Opt-in rate */}
         <div className="card p-6">
-          <div className="mb-4 flex items-start justify-between">
+          <div className="mb-4 flex items-start justify-between gap-3">
             <div>
               <div className="text-xs font-semibold uppercase tracking-wide text-muted">
                 Goal 1
               </div>
               <h2 className="text-lg font-bold text-navy">Opt-in rate</h2>
             </div>
-            <StatusBadge tone={optinBehind ? "red" : "green"}>
-              {optinBehind ? "Behind" : "On track"}
-            </StatusBadge>
+            <div className="flex items-center gap-2">
+              <div className="flex rounded-full bg-slate-100 p-0.5 text-xs font-semibold">
+                <button
+                  onClick={() => setOptinView("blended")}
+                  className={[
+                    "rounded-full px-3 py-1 transition-colors",
+                    optinView === "blended" ? "bg-navy text-white" : "text-muted hover:text-navy",
+                  ].join(" ")}
+                >
+                  Blended (all-time)
+                </button>
+                <button
+                  onClick={() => setOptinView("monthly")}
+                  className={[
+                    "rounded-full px-3 py-1 transition-colors",
+                    optinView === "monthly" ? "bg-navy text-white" : "text-muted hover:text-navy",
+                  ].join(" ")}
+                >
+                  Monthly
+                </button>
+              </div>
+              <StatusBadge tone={optinBehind ? "red" : "green"}>
+                {optinBehind ? "Behind" : "On track"}
+              </StatusBadge>
+            </div>
           </div>
 
+          {optinView === "monthly" ? (
+            <div>
+              <div className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted">
+                Monthly opt-in rate
+              </div>
+              <MonthlyOptInChart points={monthly.points} targetRate={monthly.targetRate} />
+              <p className="mt-3 rounded-xl bg-accent/5 p-3 text-sm text-ink ring-1 ring-inset ring-accent/10">
+                Views are growing faster than signups — watch this climb as popup fixes ship.
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="mb-2 flex items-end gap-2">
             <span className="text-4xl font-bold text-navy">
               {formatPct(optin.blendedRate)}
@@ -186,6 +229,8 @@ export default function GoalsView() {
           <p className="mt-3 text-xs italic text-muted">
             Generic + discount + desktop converts worst; specific + mobile best.
           </p>
+          </>
+          )}
         </div>
 
         {/* Email revenue share */}
