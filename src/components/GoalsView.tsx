@@ -43,23 +43,27 @@ function buildRecommendations(optin: OptInData, revenue: RevenueData): Recommend
   }
 
   if (optin.blendedRate < optin.targetRate) {
-    const worst = [...optin.popups].sort((a, b) => a.rate - b.rate)[0];
+    // Biggest LEAK by volume: high views at a low rate, not merely the lowest rate.
+    // Each below-target popup "leaks" the signups it would gain by hitting target.
+    const biggestLeak = [...optin.popups]
+      .map((pp) => ({ pp, leak: pp.views * Math.max(optin.targetRate - pp.rate, 0) }))
+      .sort((a, b) => b.leak - a.leak)[0].pp;
     recs.push({
       title: `Opt-in ${formatPct(optin.blendedRate)} is below the ${formatPct(
         optin.targetRate
-      )} target — fix the General Desktop popup first`,
-      detail: `Worst performer: "${worst.name}" at ${formatPct(
-        worst.rate
-      )} on ${formatNumber(worst.views)} views/yr. It's the single biggest leak.`,
+      )} target — fix the ${biggestLeak.name} popup first`,
+      detail: `Biggest leak by volume: "${biggestLeak.name}" at ${formatPct(
+        biggestLeak.rate
+      )} on ${formatNumber(biggestLeak.views)} views/yr. High traffic at a low rate makes it the single biggest source of lost signups.`,
       severity: "high",
     });
   }
 
   recs.push({
     title:
-      "Klaviyo attribution counts opens — switch to click-based attribution and recompute the true email revenue share before trusting this goal",
+      "Email drives only ~2.8% of revenue (click-attributed) vs the 10% goal",
     detail:
-      "The current email-revenue figure uses Klaviyo's default open+click model, which credits anyone who merely opened an email. Recompute with click-only attribution to get the real share before treating this goal as met.",
+      "The flows we're turning on and the welcome rebuild are how we close that gap. This is the honest click-attributed baseline — open-based attribution overstated it ~6x.",
     severity: "high",
   });
 
@@ -244,7 +248,7 @@ export default function GoalsView() {
                 Email-driven revenue (click-attributed)
               </h2>
             </div>
-            <StatusBadge tone="amber">Measurement pending</StatusBadge>
+            <StatusBadge tone="red">Behind</StatusBadge>
           </div>
 
           <div className="mb-2 flex items-end gap-2">
@@ -255,19 +259,21 @@ export default function GoalsView() {
           </div>
           <ProgressBar
             value={Math.min(1, revenue.sharePct / Math.max(revenue.targetPct, 1))}
-            tone="amber"
+            tone="red"
           />
           <p className="mt-3 text-sm text-muted">
             {formatCurrency(revenue.emailAttributedRevenue)} of{" "}
             {formatCurrency(revenue.totalRevenue)} (trailing 12 mo).
           </p>
-          <p className="mt-1 text-xs font-semibold text-amber-700">
-            Klaviyo open+click attribution — overstated. Switching to click-only.
+          <p className="mt-1 text-xs font-semibold text-navy">
+            Click-attributed (real clicks &rarr; orders). Only ~$28K of revenue
+            traces to email clicks &mdash; the honest baseline. Open-based attribution
+            overstated this ~6x.
           </p>
 
           <div className="mt-5">
             <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-              Email-attributed revenue / month
+              Email-attributed revenue / month (Klaviyo, directional)
             </div>
             <Sparkline data={revenue.monthlySeries} labels={revenue.monthlyLabels} />
             <div className="mt-1 flex justify-between text-[10px] text-muted">
@@ -278,10 +284,11 @@ export default function GoalsView() {
 
           <div className="mt-5 rounded-xl bg-accent/5 p-4 text-sm text-ink ring-1 ring-inset ring-accent/10">
             <span className="font-semibold text-navy">Read this carefully: </span>
-            This number uses Klaviyo&apos;s open+click attribution, which counts anyone
-            who merely opened an email — it overstates real impact. We&apos;re switching to
-            click-only attribution and will recompute the true email revenue share before
-            treating this goal as met.
+            This is click-attributed revenue &mdash; orders that trace back to a real
+            email click. Only ~$28K of the trailing-12-month revenue does, so email
+            drives ~2.8% vs the 10% goal. Klaviyo&apos;s default open+click model
+            overstated this ~6x (~$166K / ~16%). The flows we&apos;re activating and the
+            welcome rebuild are how we close the gap.
           </div>
         </div>
       </div>

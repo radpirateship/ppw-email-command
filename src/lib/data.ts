@@ -117,14 +117,14 @@ export const MONTHLY_LABELS: string[] = [
   "May '26",
 ];
 
-// NOTE: emailAttributedRevenue below is Klaviyo's DEFAULT open+click attribution,
-// which counts anyone who merely OPENED an email. That OVERSTATES true email impact.
-// A click-only recompute is PENDING; until then treat sharePct as overstated, not an
-// achievement. Target stays at 10%.
+// Click-attributed (Klaviyo Reporting API, conversion=Placed Order). Open+click overstated this ~6x at ~$166K/16%.
+// Flows $28,057 + campaigns $0 = $28,057 email-driven revenue; total revenue $1,012,386 (trailing 12 mo) => ~2.8% share.
+// Target stays at 10%, so status is BEHIND. monthlySeries/monthlyLabels below are the OLD open+click
+// email-attributed series — keep them as a DIRECTIONAL sparkline only, not the click headline.
 export const REVENUE_SEED: RevenueData = {
-  emailAttributedRevenue: 127166,
-  totalRevenue: 1030875,
-  sharePct: 12.3,
+  emailAttributedRevenue: 28057,
+  totalRevenue: 1012386,
+  sharePct: 2.8,
   targetPct: 10,
   monthlySeries: MONTHLY_EMAIL_REVENUE,
   monthlyLabels: MONTHLY_LABELS,
