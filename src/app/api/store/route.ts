@@ -9,18 +9,20 @@
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
-import { neon } from "@neondatabase/serverless";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+
+type Sql = NeonQueryFunction<false, false>;
 
 const ALLOWED_KEYS = new Set(["ppw_tests", "ppw_history"]);
 
-function db() {
+function db(): Sql | null {
   const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
   if (!url) return null;
   return neon(url);
 }
 
 let tableReady = false;
-async function ensureTable(sql: ReturnType<typeof neon>) {
+async function ensureTable(sql: Sql) {
   if (tableReady) return;
   await sql`CREATE TABLE IF NOT EXISTS ppw_store (
     key text PRIMARY KEY,
