@@ -15,6 +15,8 @@ interface ImageRequest {
   prompt: string;
   preset?: string;
   size?: string;
+  /** true when the prompt was written by /api/image-prompt (already brand-styled) */
+  styled?: boolean;
 }
 
 function composePrompt(userPrompt: string, presetId: string): string {
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
     }
     const presetId = body.preset && IMAGE_PRESETS[body.preset] ? body.preset : "hero";
     const preset = IMAGE_PRESETS[presetId];
-    const fullPrompt = composePrompt(body.prompt, presetId);
+    const fullPrompt = body.styled ? body.prompt.trim() : composePrompt(body.prompt, presetId);
     const size = body.size && /^\d+x\d+$/.test(body.size) ? body.size : preset.size;
 
     const apiKey = process.env.OPENAI_API_KEY;

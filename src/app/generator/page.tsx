@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { PageHeader } from "@/components/ui";
 import { FLOW_TYPES, TONES } from "@/lib/generator";
+import ImageWorkbench from "@/components/ImageWorkbench";
 
 interface EmailResult {
   channel: "email";
@@ -98,9 +99,9 @@ export default function GeneratorPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Generator"
-        title="Email & SMS copy generator."
-        subtitle="Klaviyo-ready, on-brand copy for any flow or campaign. Pick a flow type, describe the topic, generate, then paste into Klaviyo."
+        eyebrow="Email Studio"
+        title="Email & SMS studio."
+        subtitle="Klaviyo-ready, on-brand copy and images for any flow or campaign. Pick a flow type, describe the topic, generate, then paste into Klaviyo."
       />
 
       <div className="grid gap-6 lg:grid-cols-[380px,1fr]">
@@ -312,6 +313,20 @@ export default function GeneratorPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* ---- Email images ---- */}
+      <div className="card mt-6 p-6">
+        <h2 className="mb-1 text-lg font-bold text-navy">Email images</h2>
+        <p className="mb-5 text-sm text-muted">
+          Hero shots, lifestyle scenes, and section art for the emails above. Give Claude a one-line idea,
+          let it write the full brand-styled prompt, tweak if needed, generate, then upload straight to Klaviyo.
+        </p>
+        <ImageWorkbench
+          defaultPreset="hero"
+          presetChoices={["hero", "lifestyle", "background", "social"]}
+          context="Image for a PPW marketing email"
+        />
       </div>
     </>
   );

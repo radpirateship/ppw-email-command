@@ -26,17 +26,21 @@ const NAV: NavItem[] = [
   },
   {
     href: "/generator",
-    label: "Generator",
-    sub: "Email & flow HTML",
+    label: "Email Studio",
+    sub: "Copy + images",
     icon: <BoltIcon />,
-    badge: "Soon",
   },
   {
     href: "/popups",
-    label: "Popups & Images",
-    sub: "Copy + on-brand art",
+    label: "Popup Studio",
+    sub: "Guided test builder",
     icon: <ImageIcon />,
-    badge: "Soon",
+  },
+  {
+    href: "/testing",
+    label: "Testing",
+    sub: "Recs & scoreboard",
+    icon: <FlaskIcon />,
   },
   {
     href: "/plan",
@@ -141,6 +145,15 @@ function ImageIcon() {
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <circle cx="9" cy="10" r="2" />
       <path d="m21 16-5-5L5 20" />
+    </svg>
+  );
+}
+function FlaskIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M10 2v6L4.5 18a2 2 0 0 0 1.8 3h11.4a2 2 0 0 0 1.8-3L14 8V2" />
+      <path d="M8.5 2h7" />
+      <path d="M7 15h10" />
     </svg>
   );
 }
