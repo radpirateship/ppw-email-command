@@ -160,4 +160,10 @@ export function formatCurrency(n: number): string {
   });
 }
 
-export function formatPct(decimal: number, digits = 1): stri
+export function formatPct(decimal: number, digits = 1): string {
+  return `${(decimal * 100).toFixed(digits)}%`;
+}
+
+export function formatNumber(n: number): string {
+  return n.toLocaleString("en-US");
+}
