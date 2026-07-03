@@ -190,8 +190,8 @@ async function fetchMonthlySeries(
 
 /**
  * Fallback: total click-attributed conversion value over a window via a
- * values report (known-good shape — the values endpoints accept
- * value_statistics on 2025-04-15). Lumped into the current month.
+ * values report (campaign-series-reports doesn't exist as an endpoint).
+ * Lumped into the current month.
  */
 async function fetchWindowTotal(
   kind: "flow" | "campaign",
@@ -206,8 +206,9 @@ async function fetchWindowTotal(
       data: {
         type: `${kind}-values-report`,
         attributes: {
-          statistics: ["conversions"],
-          value_statistics: ["conversion_value"],
+          // conversion_value goes INSIDE statistics on this revision (same as
+          // the working flow-series call) — value_statistics is rejected.
+          statistics: ["conversions", "conversion_value"],
           conversion_metric_id: PLACED_ORDER_METRIC_ID,
           timeframe: { start: klaviyoDate(start), end: klaviyoDate(end) },
           filter: "equals(send_channel,'email')",
