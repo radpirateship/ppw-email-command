@@ -52,6 +52,11 @@ function authHeaders(key: string, revision: string) {
   };
 }
 
+/** Klaviyo rejects ISO strings with milliseconds/Z — use naive YYYY-MM-DDTHH:MM:SS. */
+function klaviyoDate(d: Date): string {
+  return d.toISOString().slice(0, 19);
+}
+
 function monthKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
@@ -104,7 +109,7 @@ const valuesReportBody = (
     attributes: {
       statistics: ["conversions"],
       conversion_metric_id: PLACED_ORDER_METRIC_ID,
-      timeframe: { start: start.toISOString(), end: end.toISOString() },
+      timeframe: { start: klaviyoDate(start), end: klaviyoDate(end) },
       filter: "equals(send_channel,'email')",
       value_statistics: ["conversion_value"],
     },
@@ -134,109 +139,4 @@ async function fetchEmailRevenue(
 }
 
 /** Total revenue (Placed Order, sum_value) over a rolling trailing-12-month window. */
-async function fetchTotalRevenue(key: string, start: Date, end: Date): Promise<number | null> {
-  try {
-    const res = await fetch("https://a.klaviyo.com/api/metric-aggregates/", {
-      method: "POST",
-      headers: authHeaders(key, REVISIONS[0]),
-      body: JSON.stringify({
-        data: {
-          type: "metric-aggregate",
-          attributes: {
-            metric_id: PLACED_ORDER_METRIC_ID,
-            measurements: ["sum_value"],
-            interval: "month",
-            timezone: "America/New_York",
-            filter: [
-              `greater-or-equal(datetime,${start.toISOString()})`,
-              `less-than(datetime,${end.toISOString()})`,
-            ],
-          },
-        },
-      }),
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const json = await res.json();
-    const arr = json?.data?.[0]?.measurements?.sum_value;
-    if (!Array.isArray(arr)) return null;
-    let sum = 0;
-    for (const v of arr) sum += Number(v ?? 0);
-    return sum;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Hybrid click-attributed email revenue:
- * baseline (pre-cutover months) + live Reporting API (post-cutover).
- * Falls back to REVENUE_SEED on any error or missing key. Never throws.
- */
-export async function GET() {
-  try {
-    const key = process.env.KLAVIYO_PRIVATE_API_KEY;
-    if (!key) return NextResponse.json(REVENUE_SEED);
-
-    const now = new Date();
-    const windowStart = new Date(now);
-    windowStart.setMonth(windowStart.getMonth() - 12);
-    const windowStartKey = monthKey(windowStart);
-
-    // 1) Baseline months still inside the trailing-12-month window.
-    const baselineInWindow = BASELINE_MONTHLY.filter((m) => m.key >= windowStartKey);
-    const baselineSum = baselineInWindow.reduce((s, m) => s + m.value, 0);
-
-    // 2) Live click-only revenue from the cutover forward (per month, for the chart).
-    const liveStart = CUTOVER > windowStart ? CUTOVER : windowStart;
-    const liveMonths: { key: string; value: number }[] = [];
-    const monthCursor = new Date(liveStart.getFullYear(), liveStart.getMonth(), 1);
-    const fetches: Promise<{ key: string; value: number | null }>[] = [];
-    while (monthCursor <= now) {
-      const mStart = new Date(Math.max(monthCursor.getTime(), liveStart.getTime()));
-      const mEnd = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
-      const end = mEnd > now ? now : mEnd;
-      const k = monthKey(monthCursor);
-      fetches.push(fetchEmailRevenue(key, mStart, end).then((value) => ({ key: k, value })));
-      monthCursor.setMonth(monthCursor.getMonth() + 1);
-    }
-    const fetched = await Promise.all(fetches);
-    let liveFailed = false;
-    for (const f of fetched) {
-      if (f.value === null) liveFailed = true;
-      else liveMonths.push({ key: f.key, value: f.value });
-    }
-    // If every live month failed, serve baseline-only (still honest) rather than seed.
-    const liveSum = liveMonths.reduce((s, m) => s + m.value, 0);
-
-    const emailAttributedRevenue = baselineSum + liveSum;
-
-    // 3) Total revenue over the same rolling window (attribution-independent).
-    const liveTotal = await fetchTotalRevenue(key, windowStart, now);
-    const totalRevenue = liveTotal && liveTotal > 0 ? liveTotal : REVENUE_SEED.totalRevenue;
-
-    const sharePct = Math.round((emailAttributedRevenue / totalRevenue) * 1000) / 10;
-
-    // 4) Chart series: baseline months + live months, in order.
-    const series = [
-      ...baselineInWindow.map((m) => ({ key: m.key, label: m.label, value: m.value })),
-      ...liveMonths
-        .filter((m) => !baselineInWindow.some((b) => b.key === m.key))
-        .sort((a, b) => (a.key < b.key ? -1 : 1))
-        .map((m) => ({ key: m.key, label: monthLabel(m.key), value: Math.round(m.value) })),
-    ];
-
-    const live: RevenueData = {
-      emailAttributedRevenue: Math.round(emailAttributedRevenue),
-      totalRevenue: Math.round(totalRevenue),
-      sharePct,
-      targetPct: REVENUE_SEED.targetPct,
-      monthlySeries: series.map((m) => m.value),
-      monthlyLabels: series.map((m) => m.label),
-      source: liveFailed ? "seed" : "live",
-    };
-    return NextResponse.json(live);
-  } catch {
-    return NextResponse.json(REVENUE_SEED);
-  }
-}
+async function
