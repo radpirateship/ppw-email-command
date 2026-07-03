@@ -52,9 +52,9 @@ function authHeaders(key: string, revision: string) {
   };
 }
 
-/** Klaviyo rejects ISO strings with milliseconds/Z — use naive YYYY-MM-DDTHH:MM:SS. */
+/** Klaviyo datetime: ISO 8601 with explicit offset, no milliseconds. */
 function klaviyoDate(d: Date): string {
-  return d.toISOString().slice(0, 19);
+  return d.toISOString().slice(0, 19) + "+00:00";
 }
 
 function monthKey(d: Date): string {
@@ -74,7 +74,8 @@ function monthLabel(key: string): string {
 async function fetchConversionValueSum(
   url: string,
   body: unknown,
-  key: string
+  key: string,
+  debug: string[]
 ): Promise<number | null> {
   for (const revision of REVISIONS) {
     try {
@@ -84,15 +85,25 @@ async function fetchConversionValueSum(
         body: JSON.stringify(body),
         cache: "no-store",
       });
-      if (res.status === 400 || res.status === 406) continue;
-      if (!res.ok) return null;
+      if (res.status === 400 || res.status === 406) {
+        debug.push(`${url} rev=${revision} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        continue;
+      }
+      if (!res.ok) {
+        debug.push(`${url} rev=${revision} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        return null;
+      }
       const json = await res.json();
       const results = json?.data?.attributes?.results;
-      if (!Array.isArray(results)) return null;
+      if (!Array.isArray(results)) {
+        debug.push(`${url} rev=${revision} -> ok but no results array`);
+        return null;
+      }
       let sum = 0;
       for (const r of results) sum += Number(r?.statistics?.conversion_value ?? 0);
       return sum;
-    } catch {
+    } catch (e) {
+      debug.push(`${url} rev=${revision} -> threw ${String(e).slice(0, 200)}`);
       continue;
     }
   }
@@ -120,18 +131,21 @@ const valuesReportBody = (
 async function fetchEmailRevenue(
   key: string,
   start: Date,
-  end: Date
+  end: Date,
+  debug: string[]
 ): Promise<number | null> {
   const [campaigns, flows] = await Promise.all([
     fetchConversionValueSum(
       "https://a.klaviyo.com/api/campaign-values-reports/",
       valuesReportBody("campaign-values-report", start, end),
-      key
+      key,
+      debug
     ),
     fetchConversionValueSum(
       "https://a.klaviyo.com/api/flow-values-reports/",
       valuesReportBody("flow-values-report", start, end),
-      key
+      key,
+      debug
     ),
   ]);
   if (campaigns === null && flows === null) return null;
@@ -139,7 +153,12 @@ async function fetchEmailRevenue(
 }
 
 /** Total revenue (Placed Order, sum_value) over a rolling trailing-12-month window. */
-async function fetchTotalRevenue(key: string, start: Date, end: Date): Promise<number | null> {
+async function fetchTotalRevenue(
+  key: string,
+  start: Date,
+  end: Date,
+  debug: string[]
+): Promise<number | null> {
   try {
     const res = await fetch("https://a.klaviyo.com/api/metric-aggregates/", {
       method: "POST",
@@ -161,14 +180,26 @@ async function fetchTotalRevenue(key: string, start: Date, end: Date): Promise<n
       }),
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      debug.push(`metric-aggregates -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      return null;
+    }
     const json = await res.json();
-    const arr = json?.data?.[0]?.measurements?.sum_value;
-    if (!Array.isArray(arr)) return null;
+    // Response shape: { data: { attributes: { data: [{ dimensions, measurements: { sum_value: [...] } }] } } }
+    // (The old route read json.data[0] — wrong path; it silently failed forever.)
+    const rows = json?.data?.attributes?.data;
+    if (!Array.isArray(rows)) {
+      debug.push("metric-aggregates -> ok but no data rows");
+      return null;
+    }
     let sum = 0;
-    for (const v of arr) sum += Number(v ?? 0);
+    for (const row of rows) {
+      const arr = row?.measurements?.sum_value ?? [];
+      for (const v of arr) sum += Number(v ?? 0);
+    }
     return sum;
-  } catch {
+  } catch (e) {
+    debug.push(`metric-aggregates -> threw ${String(e).slice(0, 200)}`);
     return null;
   }
 }
@@ -178,7 +209,9 @@ async function fetchTotalRevenue(key: string, start: Date, end: Date): Promise<n
  * baseline (pre-cutover months) + live Reporting API (post-cutover).
  * Falls back to REVENUE_SEED on any error or missing key. Never throws.
  */
-export async function GET() {
+export async function GET(request: Request) {
+  const debug: string[] = [];
+  const wantDebug = new URL(request.url).searchParams.has("debug");
   try {
     const key = process.env.KLAVIYO_PRIVATE_API_KEY;
     if (!key) return NextResponse.json(REVENUE_SEED);
@@ -202,7 +235,7 @@ export async function GET() {
       const mEnd = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
       const end = mEnd > now ? now : mEnd;
       const k = monthKey(monthCursor);
-      fetches.push(fetchEmailRevenue(key, mStart, end).then((value) => ({ key: k, value })));
+      fetches.push(fetchEmailRevenue(key, mStart, end, debug).then((value) => ({ key: k, value })));
       monthCursor.setMonth(monthCursor.getMonth() + 1);
     }
     const fetched = await Promise.all(fetches);
@@ -217,7 +250,7 @@ export async function GET() {
     const emailAttributedRevenue = baselineSum + liveSum;
 
     // 3) Total revenue over the same rolling window (attribution-independent).
-    const liveTotal = await fetchTotalRevenue(key, windowStart, now);
+    const liveTotal = await fetchTotalRevenue(key, windowStart, now, debug);
     const totalRevenue = liveTotal && liveTotal > 0 ? liveTotal : REVENUE_SEED.totalRevenue;
 
     const sharePct = Math.round((emailAttributedRevenue / totalRevenue) * 1000) / 10;
@@ -240,8 +273,12 @@ export async function GET() {
       monthlyLabels: series.map((m) => m.label),
       source: liveFailed ? "seed" : "live",
     };
+    if (wantDebug) return NextResponse.json({ ...live, _debug: debug });
     return NextResponse.json(live);
-  } catch {
+  } catch (e) {
+    if (wantDebug) {
+      return NextResponse.json({ ...REVENUE_SEED, _debug: [...debug, `GET threw ${String(e).slice(0, 200)}`] });
+    }
     return NextResponse.json(REVENUE_SEED);
   }
 }
