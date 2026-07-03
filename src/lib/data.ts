@@ -96,14 +96,16 @@ export const MONTHLY_OPTIN_SEED: MonthlyOptInData = {
 
 // --- Revenue seed -------------------------------------------------------------
 
-// Monthly email-attributed revenue series (May 2025 -> May 2026)
+// Monthly CLICK-ONLY email-attributed revenue (Jul 2025 -> Jun 2026).
+// Pre-cutover months = old open+click shape scaled to the verified $28,057
+// click-only total (Email_Revenue_Baseline.xlsx, factor ~0.2206). Jun '26 is a
+// ratio-scaled estimate. Account switched to click-only attribution ~Jul 1 2026;
+// see /api/klaviyo/revenue for the hybrid live logic.
 export const MONTHLY_EMAIL_REVENUE: number[] = [
-  0, 0, 218.9, 997, 969.99, 0, 10743, 4441.63, 34273.77, 19393.2, 4010.51, 29210.39, 22907.93,
+  48, 220, 214, 0, 2370, 980, 7562, 4279, 885, 6445, 5054, 241,
 ];
 
 export const MONTHLY_LABELS: string[] = [
-  "May '25",
-  "Jun '25",
   "Jul '25",
   "Aug '25",
   "Sep '25",
@@ -115,12 +117,12 @@ export const MONTHLY_LABELS: string[] = [
   "Mar '26",
   "Apr '26",
   "May '26",
+  "Jun '26",
 ];
 
-// Click-attributed (Klaviyo Reporting API, conversion=Placed Order). Open+click overstated this ~6x at ~$166K/16%.
+// Click-attributed (verified via manual pull after the attribution switch).
 // Flows $28,057 + campaigns $0 = $28,057 email-driven revenue; total revenue $1,012,386 (trailing 12 mo) => ~2.8% share.
-// Target stays at 10%, so status is BEHIND. monthlySeries/monthlyLabels below are the OLD open+click
-// email-attributed series — keep them as a DIRECTIONAL sparkline only, not the click headline.
+// Target stays at 10%, so status is BEHIND. Do NOT revert to Klaviyo's open+click figures (~$127K-166K) — overstated ~4.5-6x.
 export const REVENUE_SEED: RevenueData = {
   emailAttributedRevenue: 28057,
   totalRevenue: 1012386,
@@ -158,10 +160,4 @@ export function formatCurrency(n: number): string {
   });
 }
 
-export function formatPct(decimal: number, digits = 1): string {
-  return `${(decimal * 100).toFixed(digits)}%`;
-}
-
-export function formatNumber(n: number): string {
-  return n.toLocaleString("en-US");
-}
+export function formatPct(decimal: number, digits = 1): stri
