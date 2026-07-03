@@ -1,21 +1,33 @@
 // ============================================================================
-// PPW Command — tiny KV store for test history & variant registry.
-// GET  /api/store?key=ppw_tests        → { value }
-// PUT  /api/store  { key, value }      → { ok: true }
-// Backed by Vercel KV / Upstash Redis REST (create in Vercel → Storage; the
-// integration adds the env vars). Returns 503 when unconfigured — the client
-// falls back to localStorage so the app keeps working.
+// PPW Command — tiny key-value store for test history & variant registry,
+// backed by Neon Postgres (single jsonb table).
+// GET  /api/store?key=ppw_tests    → { value }
+// PUT  /api/store  { key, value }  → { ok: true }
+// Env: DATABASE_URL (Neon connection string — Vercel's Neon integration sets
+// it automatically). Returns 503 when unconfigured — the client falls back to
+// localStorage so the app keeps working.
 // ============================================================================
 
 import { NextRequest, NextResponse } from "next/server";
+import { neon } from "@neondatabase/serverless";
 
 const ALLOWED_KEYS = new Set(["ppw_tests", "ppw_history"]);
 
-function kvConfig(): { url: string; token: string } | null {
-  const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (!url || !token) return null;
-  return { url: url.replace(/\/$/, ""), token };
+function db() {
+  const url = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  if (!url) return null;
+  return neon(url);
+}
+
+let tableReady = false;
+async function ensureTable(sql: ReturnType<typeof neon>) {
+  if (tableReady) return;
+  await sql`CREATE TABLE IF NOT EXISTS ppw_store (
+    key text PRIMARY KEY,
+    value jsonb NOT NULL,
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`;
+  tableReady = true;
 }
 
 export async function GET(request: NextRequest) {
@@ -23,18 +35,12 @@ export async function GET(request: NextRequest) {
   if (!ALLOWED_KEYS.has(key)) {
     return NextResponse.json({ error: "invalid key" }, { status: 400 });
   }
-  const kv = kvConfig();
-  if (!kv) return NextResponse.json({ error: "kv-not-configured" }, { status: 503 });
+  const sql = db();
+  if (!sql) return NextResponse.json({ error: "db-not-configured" }, { status: 503 });
   try {
-    const res = await fetch(`${kv.url}/get/${key}`, {
-      headers: { Authorization: `Bearer ${kv.token}` },
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(`KV ${res.status}`);
-    const data = await res.json();
-    // Upstash returns { result: string | null }
-    const value = data?.result ? JSON.parse(data.result) : null;
-    return NextResponse.json({ value });
+    await ensureTable(sql);
+    const rows = (await sql`SELECT value FROM ppw_store WHERE key = ${key}`) as { value: unknown }[];
+    return NextResponse.json({ value: rows[0]?.value ?? null });
   } catch (e) {
     return NextResponse.json({ error: String(e).slice(0, 200) }, { status: 500 });
   }
@@ -45,16 +51,13 @@ export async function PUT(request: NextRequest) {
   if (!key || !ALLOWED_KEYS.has(key)) {
     return NextResponse.json({ error: "invalid key" }, { status: 400 });
   }
-  const kv = kvConfig();
-  if (!kv) return NextResponse.json({ error: "kv-not-configured" }, { status: 503 });
+  const sql = db();
+  if (!sql) return NextResponse.json({ error: "db-not-configured" }, { status: 503 });
   try {
-    const res = await fetch(`${kv.url}/set/${key}`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${kv.token}`, "content-type": "application/json" },
-      body: JSON.stringify(JSON.stringify(value)),
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(`KV ${res.status}`);
+    await ensureTable(sql);
+    await sql`INSERT INTO ppw_store (key, value, updated_at)
+      VALUES (${key}, ${JSON.stringify(value)}::jsonb, now())
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ error: String(e).slice(0, 200) }, { status: 500 });

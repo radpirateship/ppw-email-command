@@ -221,7 +221,7 @@ function PopupStudio() {
         ...history,
       ]);
       setLogMsg(
-        `Test logged (${backend === "kv" ? "saved to KV" : "saved in this browser — add the KV store in Vercel for cross-device history"}). Track it on the Testing tab.`
+        `Test logged (${backend === "kv" ? "saved to the database" : "saved in this browser — connect Neon in Vercel for cross-device history"}). Track it on the Testing tab.`
       );
       setFormNameA("");
       setFormNameB("");

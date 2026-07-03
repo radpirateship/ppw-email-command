@@ -127,8 +127,8 @@ export default function TestingPage() {
 
       {backend === "local" && (
         <p className="mb-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 ring-1 ring-inset ring-amber-100">
-          History is saved in this browser only. Create the KV store in Vercel (Storage → Create Database → Upstash Redis)
-          and redeploy for cross-device persistence.
+          History is saved in this browser only. Connect the Neon database (Vercel → Storage → Neon, or add
+          DATABASE_URL to the env vars) and redeploy for cross-device persistence.
         </p>
       )}
 
