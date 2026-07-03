@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { REVENUE_SEED, type RevenueData } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 
 const PLACED_ORDER_METRIC_ID = "Xirk9q";
-const REVISIONS = ["2024-10-15", "2025-04-15", "2024-07-15"];
+// 2025-04-15 supports value_statistics on report endpoints; 2024-10-15 does NOT.
+const REVISION = "2025-04-15";
 
 /**
  * ATTRIBUTION CUTOVER — READ THIS BEFORE TOUCHING THE NUMBERS.
@@ -20,10 +22,13 @@ const REVISIONS = ["2024-10-15", "2025-04-15", "2024-07-15"];
  *    open+click monthly shape scaled to the verified $28,057 click-only total
  *    (factor 0.2206). Jun '26 is the same ratio applied to its $1,093
  *    open+click figure (estimate).
- *  - From the cutover FORWARD, the Reporting API data is genuinely click-only,
- *    so we pull it live.
+ *  - From the cutover FORWARD, we pull live monthly series from the Reporting
+ *    API (flow + campaign series reports — ONE call each, regardless of month
+ *    count, because Klaviyo rate-limits report endpoints to ~2/min).
  * Baseline months roll out of the trailing-12-month window naturally; by
  * ~Jul 2027 this route is 100% live.
+ *
+ * Append ?debug=1 to see Klaviyo error details when something fails.
  */
 const CUTOVER = new Date("2026-07-02T00:00:00-04:00");
 
@@ -43,10 +48,10 @@ const BASELINE_MONTHLY: { key: string; label: string; value: number }[] = [
   { key: "2026-06", label: "Jun '26", value: 241 }, // estimate (ratio-scaled)
 ];
 
-function authHeaders(key: string, revision: string) {
+function authHeaders(key: string) {
   return {
     Authorization: `Klaviyo-API-Key ${key}`,
-    revision,
+    revision: REVISION,
     "content-type": "application/json",
     accept: "application/json",
   };
@@ -58,7 +63,7 @@ function klaviyoDate(d: Date): string {
 }
 
 function monthKey(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
 function monthLabel(key: string): string {
@@ -67,146 +72,140 @@ function monthLabel(key: string): string {
   return `${names[m - 1]} '${String(y).slice(2)}`;
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 /**
- * POST a *-values-report body, retrying across revisions on 400/406.
- * Returns summed conversion_value across results, or null if all failed.
+ * POST a Klaviyo report request. Retries on 429 (rate limit) with a short
+ * wait, up to 3 attempts. Returns parsed JSON or null (with debug detail).
  */
-async function fetchConversionValueSum(
+async function postReport(
   url: string,
   body: unknown,
   key: string,
   debug: string[]
-): Promise<number | null> {
-  for (const revision of REVISIONS) {
+): Promise<unknown | null> {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       const res = await fetch(url, {
         method: "POST",
-        headers: authHeaders(key, revision),
+        headers: authHeaders(key),
         body: JSON.stringify(body),
         cache: "no-store",
       });
-      if (res.status === 400 || res.status === 406) {
-        debug.push(`${url} rev=${revision} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+      if (res.status === 429) {
+        debug.push(`${url} attempt ${attempt} -> 429, retrying`);
+        await sleep(1500 * attempt);
         continue;
       }
       if (!res.ok) {
-        debug.push(`${url} rev=${revision} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
+        debug.push(`${url} -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
         return null;
       }
-      const json = await res.json();
-      const results = json?.data?.attributes?.results;
-      if (!Array.isArray(results)) {
-        debug.push(`${url} rev=${revision} -> ok but no results array`);
-        return null;
-      }
-      let sum = 0;
-      for (const r of results) sum += Number(r?.statistics?.conversion_value ?? 0);
-      return sum;
+      return await res.json();
     } catch (e) {
-      debug.push(`${url} rev=${revision} -> threw ${String(e).slice(0, 200)}`);
-      continue;
+      debug.push(`${url} attempt ${attempt} -> threw ${String(e).slice(0, 200)}`);
+      await sleep(1000);
     }
   }
   return null;
 }
 
-const valuesReportBody = (
-  type: "campaign-values-report" | "flow-values-report",
-  start: Date,
-  end: Date
-) => ({
-  data: {
-    type,
-    attributes: {
-      statistics: ["conversions"],
-      conversion_metric_id: PLACED_ORDER_METRIC_ID,
-      timeframe: { start: klaviyoDate(start), end: klaviyoDate(end) },
-      filter: "equals(send_channel,'email')",
-      value_statistics: ["conversion_value"],
-    },
-  },
-});
-
-/** Click-only email revenue for one window (flows + campaigns). Null if both endpoints failed. */
-async function fetchEmailRevenue(
+/**
+ * Monthly click-attributed email conversion value from a series report
+ * (flow-series-report or campaign-series-report). Returns a map of
+ * "YYYY-MM" -> summed conversion_value, or null on failure.
+ */
+async function fetchMonthlySeries(
+  kind: "flow" | "campaign",
   key: string,
   start: Date,
   end: Date,
   debug: string[]
-): Promise<number | null> {
-  const [campaigns, flows] = await Promise.all([
-    fetchConversionValueSum(
-      "https://a.klaviyo.com/api/campaign-values-reports/",
-      valuesReportBody("campaign-values-report", start, end),
-      key,
-      debug
-    ),
-    fetchConversionValueSum(
-      "https://a.klaviyo.com/api/flow-values-reports/",
-      valuesReportBody("flow-values-report", start, end),
-      key,
-      debug
-    ),
-  ]);
-  if (campaigns === null && flows === null) return null;
-  return (campaigns ?? 0) + (flows ?? 0);
+): Promise<Map<string, number> | null> {
+  const url = `https://a.klaviyo.com/api/${kind}-series-reports/`;
+  const body = {
+    data: {
+      type: `${kind}-series-report`,
+      attributes: {
+        statistics: ["conversions"],
+        value_statistics: ["conversion_value"],
+        conversion_metric_id: PLACED_ORDER_METRIC_ID,
+        interval: "monthly",
+        timeframe: { start: klaviyoDate(start), end: klaviyoDate(end) },
+        filter: "equals(send_channel,'email')",
+      },
+    },
+  };
+  const json = (await postReport(url, body, key, debug)) as {
+    data?: {
+      attributes?: {
+        date_times?: string[];
+        results?: { statistics?: { conversion_value?: number[] } }[];
+      };
+    };
+  } | null;
+  if (!json) return null;
+  const dateTimes = json?.data?.attributes?.date_times;
+  const results = json?.data?.attributes?.results;
+  if (!Array.isArray(dateTimes) || !Array.isArray(results)) {
+    debug.push(`${url} -> ok but unexpected shape: ${JSON.stringify(json)?.slice(0, 300)}`);
+    return null;
+  }
+  const byMonth = new Map<string, number>();
+  dateTimes.forEach((dt, i) => {
+    const k = monthKey(new Date(dt));
+    let sum = byMonth.get(k) ?? 0;
+    for (const r of results) sum += Number(r?.statistics?.conversion_value?.[i] ?? 0);
+    byMonth.set(k, sum);
+  });
+  return byMonth;
 }
 
-/** Total revenue (Placed Order, sum_value) over a rolling trailing-12-month window. */
+/** Total revenue (Placed Order, sum_value) over a rolling window. */
 async function fetchTotalRevenue(
   key: string,
   start: Date,
   end: Date,
   debug: string[]
 ): Promise<number | null> {
-  try {
-    const res = await fetch("https://a.klaviyo.com/api/metric-aggregates/", {
-      method: "POST",
-      headers: authHeaders(key, REVISIONS[0]),
-      body: JSON.stringify({
-        data: {
-          type: "metric-aggregate",
-          attributes: {
-            metric_id: PLACED_ORDER_METRIC_ID,
-            measurements: ["sum_value"],
-            interval: "month",
-            timezone: "America/New_York",
-            filter: [
-              `greater-or-equal(datetime,${klaviyoDate(start)})`,
-              `less-than(datetime,${klaviyoDate(end)})`,
-            ],
-          },
+  const json = (await postReport(
+    "https://a.klaviyo.com/api/metric-aggregates/",
+    {
+      data: {
+        type: "metric-aggregate",
+        attributes: {
+          metric_id: PLACED_ORDER_METRIC_ID,
+          measurements: ["sum_value"],
+          interval: "month",
+          timezone: "America/New_York",
+          filter: [
+            `greater-or-equal(datetime,${klaviyoDate(start)})`,
+            `less-than(datetime,${klaviyoDate(end)})`,
+          ],
         },
-      }),
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      debug.push(`metric-aggregates -> ${res.status}: ${(await res.text()).slice(0, 300)}`);
-      return null;
-    }
-    const json = await res.json();
-    // Response shape: { data: { attributes: { data: [{ dimensions, measurements: { sum_value: [...] } }] } } }
-    // (The old route read json.data[0] — wrong path; it silently failed forever.)
-    const rows = json?.data?.attributes?.data;
-    if (!Array.isArray(rows)) {
-      debug.push("metric-aggregates -> ok but no data rows");
-      return null;
-    }
-    let sum = 0;
-    for (const row of rows) {
-      const arr = row?.measurements?.sum_value ?? [];
-      for (const v of arr) sum += Number(v ?? 0);
-    }
-    return sum;
-  } catch (e) {
-    debug.push(`metric-aggregates -> threw ${String(e).slice(0, 200)}`);
+      },
+    },
+    key,
+    debug
+  )) as {
+    data?: { attributes?: { data?: { measurements?: { sum_value?: number[] } }[] } };
+  } | null;
+  if (!json) return null;
+  const rows = json?.data?.attributes?.data;
+  if (!Array.isArray(rows)) {
+    debug.push("metric-aggregates -> ok but no data rows");
     return null;
   }
+  let sum = 0;
+  for (const row of rows) {
+    for (const v of row?.measurements?.sum_value ?? []) sum += Number(v ?? 0);
+  }
+  return sum;
 }
 
 /**
  * Hybrid click-attributed email revenue:
- * baseline (pre-cutover months) + live Reporting API (post-cutover).
+ * baseline (pre-cutover months) + live series reports (post-cutover).
  * Falls back to REVENUE_SEED on any error or missing key. Never throws.
  */
 export async function GET(request: Request) {
@@ -225,27 +224,20 @@ export async function GET(request: Request) {
     const baselineInWindow = BASELINE_MONTHLY.filter((m) => m.key >= windowStartKey);
     const baselineSum = baselineInWindow.reduce((s, m) => s + m.value, 0);
 
-    // 2) Live click-only revenue from the cutover forward (per month, for the chart).
+    // 2) Live click-only monthly series from the cutover forward.
+    //    Sequential (not parallel) — Klaviyo report endpoints rate-limit hard.
     const liveStart = CUTOVER > windowStart ? CUTOVER : windowStart;
-    const liveMonths: { key: string; value: number }[] = [];
-    const monthCursor = new Date(liveStart.getFullYear(), liveStart.getMonth(), 1);
-    const fetches: Promise<{ key: string; value: number | null }>[] = [];
-    while (monthCursor <= now) {
-      const mStart = new Date(Math.max(monthCursor.getTime(), liveStart.getTime()));
-      const mEnd = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
-      const end = mEnd > now ? now : mEnd;
-      const k = monthKey(monthCursor);
-      fetches.push(fetchEmailRevenue(key, mStart, end, debug).then((value) => ({ key: k, value })));
-      monthCursor.setMonth(monthCursor.getMonth() + 1);
+    const flowSeries = await fetchMonthlySeries("flow", key, liveStart, now, debug);
+    const campaignSeries = await fetchMonthlySeries("campaign", key, liveStart, now, debug);
+    const liveFailed = flowSeries === null && campaignSeries === null;
+
+    const liveByMonth = new Map<string, number>();
+    for (const series of [flowSeries, campaignSeries]) {
+      if (!series) continue;
+      for (const [k, v] of series) liveByMonth.set(k, (liveByMonth.get(k) ?? 0) + v);
     }
-    const fetched = await Promise.all(fetches);
-    let liveFailed = false;
-    for (const f of fetched) {
-      if (f.value === null) liveFailed = true;
-      else liveMonths.push({ key: f.key, value: f.value });
-    }
-    // If every live month failed, serve baseline-only (still honest) rather than seed.
-    const liveSum = liveMonths.reduce((s, m) => s + m.value, 0);
+    let liveSum = 0;
+    for (const v of liveByMonth.values()) liveSum += v;
 
     const emailAttributedRevenue = baselineSum + liveSum;
 
@@ -256,12 +248,12 @@ export async function GET(request: Request) {
     const sharePct = Math.round((emailAttributedRevenue / totalRevenue) * 1000) / 10;
 
     // 4) Chart series: baseline months + live months, in order.
+    const liveMonths = [...liveByMonth.entries()]
+      .filter(([k]) => !baselineInWindow.some((b) => b.key === k))
+      .sort(([a], [b]) => (a < b ? -1 : 1));
     const series = [
-      ...baselineInWindow.map((m) => ({ key: m.key, label: m.label, value: m.value })),
-      ...liveMonths
-        .filter((m) => !baselineInWindow.some((b) => b.key === m.key))
-        .sort((a, b) => (a.key < b.key ? -1 : 1))
-        .map((m) => ({ key: m.key, label: monthLabel(m.key), value: Math.round(m.value) })),
+      ...baselineInWindow.map((m) => ({ label: m.label, value: m.value })),
+      ...liveMonths.map(([k, v]) => ({ label: monthLabel(k), value: Math.round(v) })),
     ];
 
     const live: RevenueData = {
