@@ -50,6 +50,19 @@ export interface FlowStatus {
   missing: string[];
 }
 
+/** Live account overview for Home tiles and Goals recommendations. */
+export interface OverviewData {
+  subscribers: { email: number; sms: number };
+  flows: {
+    live: number | null;
+    builtButOff: string[];
+    missing: string[];
+    drafts: number | null;
+  };
+  source: "seed" | "live";
+  fetchedAt: string;
+}
+
 // --- Subscribers --------------------------------------------------------------
 
 export const SUBSCRIBERS = {

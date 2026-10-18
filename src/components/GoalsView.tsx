@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import {
   OPTIN_SEED,
   REVENUE_SEED,
-  FLOW_STATUS,
   MONTHLY_OPTIN_SEED,
+  type OverviewData,
   type OptInData,
   type RevenueData,
   type MonthlyOptInData,
@@ -16,6 +16,7 @@ import {
 import { ProgressBar } from "@/components/ui";
 import Sparkline from "@/components/Sparkline";
 import MonthlyOptInChart from "@/components/MonthlyOptInChart";
+import { useOverview, freshnessLabel } from "@/lib/useOverview";
 
 interface Recommendation {
   title: string;
@@ -23,21 +24,26 @@ interface Recommendation {
   severity: "high" | "med" | "low";
 }
 
-function buildRecommendations(optin: OptInData, revenue: RevenueData): Recommendation[] {
+function buildRecommendations(
+  optin: OptInData,
+  revenue: RevenueData,
+  overview: OverviewData
+): Recommendation[] {
   const recs: Recommendation[] = [];
+  const { builtButOff, missing } = overview.flows;
 
-  if (FLOW_STATUS.builtButOff.length > 0) {
+  if (builtButOff.length > 0) {
     recs.push({
-      title: `${FLOW_STATUS.builtButOff.length} abandonment flows are built but switched OFF`,
-      detail: `Activate them now: ${FLOW_STATUS.builtButOff.join(", ")}. These recover high-intent shoppers and are pure upside.`,
+      title: `${builtButOff.length} abandonment flow${builtButOff.length === 1 ? " is" : "s are"} built but switched OFF`,
+      detail: `Activate or retire: ${builtButOff.join(", ")}. These recover high-intent shoppers and are pure upside.`,
       severity: "high",
     });
   }
 
-  if (FLOW_STATUS.missing.length > 0) {
+  if (missing.length > 0) {
     recs.push({
-      title: "No post-purchase, review, win-back or sunset flows exist",
-      detail: `Missing: ${FLOW_STATUS.missing.join(", ")}. These are the backbone of retention and deliverability.`,
+      title: `${missing.length} core lifecycle flow${missing.length === 1 ? " is" : "s are"} not live yet`,
+      detail: `Missing: ${missing.join(", ")}. These are the backbone of retention and deliverability.`,
       severity: "high",
     });
   }
@@ -47,8 +53,8 @@ function buildRecommendations(optin: OptInData, revenue: RevenueData): Recommend
     // Each below-target popup "leaks" the signups it would gain by hitting target.
     const biggestLeak = [...optin.popups]
       .map((pp) => ({ pp, leak: pp.views * Math.max(optin.targetRate - pp.rate, 0) }))
-      .sort((a, b) => b.leak - a.leak)[0].pp;
-    recs.push({
+      .sort((a, b) => b.leak - a.leak)[0]?.pp;
+    if (biggestLeak) recs.push({
       title: `Opt-in ${formatPct(optin.blendedRate)} is below the ${formatPct(
         optin.targetRate
       )} target — fix the ${biggestLeak.name} popup first`,
@@ -59,16 +65,15 @@ function buildRecommendations(optin: OptInData, revenue: RevenueData): Recommend
     });
   }
 
-  recs.push({
-    title:
-      "Email drives only ~2.8% of revenue (click-attributed) vs the 10% goal",
+  if (revenue.sharePct < revenue.targetPct) recs.push({
+    title: `Email drives only ~${revenue.sharePct}% of revenue (click-attributed) vs the ${revenue.targetPct}% goal`,
     detail:
       "The flows we're turning on and the welcome rebuild are how we close that gap. This is the honest click-attributed baseline — open-based attribution overstated it ~6x.",
     severity: "high",
   });
 
   recs.push({
-    title: "783 SMS subscribers are unused — add SMS to checkout abandonment",
+    title: `${formatNumber(overview.subscribers.sms)} SMS subscribers are unused — add SMS to checkout abandonment`,
     detail:
       "You're paying to collect SMS consent but not messaging them. Layer SMS onto the abandoned checkout flow for fast lift.",
     severity: "med",
@@ -89,6 +94,8 @@ export default function GoalsView() {
   const [revenue, setRevenue] = useState<RevenueData>(REVENUE_SEED);
   const [monthly, setMonthly] = useState<MonthlyOptInData>(MONTHLY_OPTIN_SEED);
   const [optinView, setOptinView] = useState<"blended" | "monthly">("blended");
+  const { data: overview, loading: overviewLoading } = useOverview();
+  const [revenueLive, setRevenueLive] = useState<boolean | null>(null);
 
   // Wire the live-or-seed API routes. They always return valid data (seed fallback),
   // so the page renders instantly from seed and upgrades if live data arrives.
@@ -100,7 +107,12 @@ export default function GoalsView() {
       .catch(() => {});
     fetch("/api/klaviyo/revenue")
       .then((r) => r.json())
-      .then((d: RevenueData) => alive && d && setRevenue(d))
+      .then((d: RevenueData) => {
+        if (alive && d) {
+          setRevenue(d);
+          setRevenueLive(d.source === "live");
+        }
+      })
       .catch(() => {});
     fetch("/api/klaviyo/optin-monthly")
       .then((r) => r.json())
@@ -118,7 +130,7 @@ export default function GoalsView() {
   const worstName = sorted[0]?.name;
   const bestName = sorted[sorted.length - 1]?.name;
 
-  const recs = buildRecommendations(optin, revenue);
+  const recs = buildRecommendations(optin, revenue, overview);
 
   return (
     <div className="space-y-8">
@@ -285,13 +297,19 @@ export default function GoalsView() {
           <div className="mt-5 rounded-xl bg-accent/5 p-4 text-sm text-ink ring-1 ring-inset ring-accent/10">
             <span className="font-semibold text-navy">Read this carefully: </span>
             This is click-attributed revenue &mdash; orders that trace back to a real
-            email click. Only ~$28K of the trailing-12-month revenue does, so email
-            drives ~2.8% vs the 10% goal. Klaviyo&apos;s default open+click model
-            overstated this ~6x (~$166K / ~16%). The flows we&apos;re activating and the
+            email click. {formatCurrency(revenue.emailAttributedRevenue)} of the
+            trailing-12-month revenue does, so email drives ~{revenue.sharePct}% vs
+            the {revenue.targetPct}% goal. Klaviyo&apos;s default open+click model
+            overstates this several times over. The flows we&apos;re activating and the
             welcome rebuild are how we close the gap.
           </div>
         </div>
       </div>
+
+      <p className="text-xs text-muted">
+        {freshnessLabel(overview.source, overview.fetchedAt, overviewLoading)}
+        {revenueLive === false && " · revenue is showing the saved snapshot"}
+      </p>
 
       {/* Weak points & recommendations */}
       <section>
