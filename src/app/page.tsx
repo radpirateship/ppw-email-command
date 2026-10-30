@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/ui";
 import TaskBoard from "@/components/TaskBoard";
 import HomeStats from "@/components/HomeStats";
+import WeeklyEmailRevenue from "@/components/WeeklyEmailRevenue";
 
 export default function HomePage() {
   return (
@@ -12,6 +13,8 @@ export default function HomePage() {
       />
 
       <HomeStats />
+
+      <WeeklyEmailRevenue />
 
       <TaskBoard />
     </>
